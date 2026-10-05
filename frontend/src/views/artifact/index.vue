@@ -43,7 +43,12 @@
       </thead>
       <tbody>
         <tr v-for="row in rows" :key="String(row.id)">
-          <td v-for="column in columns" :key="column">{{ row[column] ?? '—' }}</td>
+          <td v-for="column in columns" :key="column">
+            <RouterLink v-if="column === codeColumn" class="link" :to="`/artifact/${row.id}`">
+              {{ row[column] ?? '—' }}
+            </RouterLink>
+            <template v-else>{{ row[column] || '—' }}</template>
+          </td>
           <td>{{ row.status }}</td>
           <td class="row-actions">
             <button
@@ -55,6 +60,7 @@
             >
               {{ action }}
             </button>
+            <RouterLink class="link" :to="`/artifact/${row.id}`">详情</RouterLink>
           </td>
         </tr>
         <tr v-if="!rows.length">
@@ -64,7 +70,7 @@
     </table>
 
     <footer class="page-foot">
-      <span>共 {{ total }} 条出土遗物记录</span>
+      <span>共 {{ total }} 条出土遗物记录 · 数据版本 v{{ version }}（入库与库位占用同事务落库）</span>
       <span v-if="errorMessage" class="error-text">{{ errorMessage }}</span>
     </footer>
   </section>
@@ -74,6 +80,7 @@
 import { computed, onMounted, ref } from 'vue'
 
 import {
+  dataVersion,
   downloadEntries,
   listEntries,
   moduleMeta,
@@ -82,13 +89,14 @@ import {
 import type { EntryRow } from '@/data/types'
 
 const meta = moduleMeta('artifact')
-const columns = ["器物编号", "出土探方", "出土层位", "器物质地", "器物类型", "完残程度", "登记人", "登记状态"]
+const columns = ["器物编号", "出土探方", "出土层位", "器物质地", "器物类型", "完残程度", "登记人", "登记状态", "入库架位"]
+const codeColumn = "器物编号"
 const actions = ["完成清洗", "分配编号", "办理入库"]
 const statuses = ["已采集", "已清洗", "已编号", "已入库", "借出展示"]
-const stats = [{"label": "遗物总数", "value": 0}, {"label": "已入库数", "value": 0}, {"label": "待清洗数", "value": 0}]
 
 const rows = ref<EntryRow[]>([])
 const total = ref(0)
+const version = ref(0)
 const errorMessage = ref('')
 const filters = ref<Record<string, string>>({})
 const filterFields = columns.slice(0, 3)
@@ -98,6 +106,11 @@ const statusSummary = computed(() =>
     count: rows.value.filter((row) => String(row.status) === status).length,
   })),
 )
+const stats = computed(() => [
+  { label: "遗物总数", value: rows.value.length },
+  { label: "已入库数", value: rows.value.filter((row) => String(row.status) === "已入库").length },
+  { label: "待清洗数", value: rows.value.filter((row) => String(row.status) === "已采集").length },
+])
 
 function resetFilters() {
   filters.value = {}
@@ -114,10 +127,10 @@ function openCreate() {
 
 function runAction(action: string, row: EntryRow) {
   errorMessage.value = ''
-  const result = applyAction(meta.key, Number(row.id), action)
+  // 办理入库以读取到的版本号做乐观锁，同架位并发时后到请求失败并提示占用。
+  const result = applyAction(meta.key, Number(row.id), action, dataVersion())
   if (!result.ok) {
     errorMessage.value = result.message
-    return
   }
   reload()
 }
@@ -128,10 +141,12 @@ function reload() {
     const payload = listEntries(meta.key, filters.value)
     rows.value = payload.items
     total.value = payload.total
+    version.value = dataVersion()
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '出土遗物列表读取失败'
   }
 }
 
+// 每次进入列表都重新读取持久化结果，避免详情页入库后返回列表还残留旧状态。
 onMounted(reload)
 </script>

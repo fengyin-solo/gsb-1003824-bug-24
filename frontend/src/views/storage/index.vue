@@ -64,7 +64,7 @@
     </table>
 
     <footer class="page-foot">
-      <span>共 {{ total }} 条库房管理记录</span>
+      <span>共 {{ total }} 条库房架位记录 · 当前件数与出土遗物入库流水同事务计算，跨模块一致</span>
       <span v-if="errorMessage" class="error-text">{{ errorMessage }}</span>
     </footer>
   </section>
@@ -78,6 +78,7 @@ import {
   listEntries,
   moduleMeta,
   runAction as applyAction,
+  shelfOccupancy,
 } from '@/api/local-service'
 import type { EntryRow } from '@/data/types'
 
@@ -85,7 +86,6 @@ const meta = moduleMeta('storage')
 const columns = ["架位编号", "库房名称", "存放器物类别", "架位层数", "容纳件数", "当前件数", "管理人", "架位状态"]
 const actions = ["存放器物", "调整整理", "临时封存"]
 const statuses = ["正常使用", "已满", "待整理", "临时封存"]
-const stats = [{"label": "架位总数", "value": 0}, {"label": "已满架位", "value": 0}, {"label": "可用架位", "value": 0}]
 
 const rows = ref<EntryRow[]>([])
 const total = ref(0)
@@ -98,6 +98,14 @@ const statusSummary = computed(() =>
     count: rows.value.filter((row) => String(row.status) === status).length,
   })),
 )
+const stats = computed(() => {
+  const occupancy = shelfOccupancy()
+  return [
+    { label: "架位总数", value: occupancy.length },
+    { label: "已满架位", value: occupancy.filter((shelf) => shelf.full).length },
+    { label: "可用架位", value: occupancy.filter((shelf) => !shelf.full && !shelf.sealed).length },
+  ]
+})
 
 function resetFilters() {
   filters.value = {}
@@ -133,5 +141,6 @@ function reload() {
   }
 }
 
+// 每次进入库房页都重算占用，确保从出土遗物页办完入库过来看到的件数就是最新值。
 onMounted(reload)
 </script>
