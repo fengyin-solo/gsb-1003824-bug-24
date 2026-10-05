@@ -5,6 +5,7 @@ const Trench = () => import('@/views/trench/index.vue')
 const Stratum = () => import('@/views/stratum/index.vue')
 const Feature = () => import('@/views/feature/index.vue')
 const Artifact = () => import('@/views/artifact/index.vue')
+const ArtifactDetail = () => import('@/views/artifact/detail.vue')
 const Flotation = () => import('@/views/flotation/index.vue')
 const Dating = () => import('@/views/dating/index.vue')
 const Photography = () => import('@/views/photography/index.vue')
@@ -28,6 +29,7 @@ const router = createRouter({
     { path: '/stratum', name: 'stratum', component: Stratum },
     { path: '/feature', name: 'feature', component: Feature },
     { path: '/artifact', name: 'artifact', component: Artifact },
+    { path: '/artifact/:id', name: 'artifact-detail', component: ArtifactDetail },
     { path: '/flotation', name: 'flotation', component: Flotation },
     { path: '/dating', name: 'dating', component: Dating },
     { path: '/photography', name: 'photography', component: Photography },

@@ -3,7 +3,7 @@
     <header class="page-head">
       <div>
         <h2>库房管理管理</h2>
-        <p class="page-desc">维护库房架位，围绕架位编号、库房名称、存放器物类别、架位层数做登记、筛选与状态流转。</p>
+        <p class="page-desc">维护库房架位，围绕架位编号、库房名称、存放器物类别、架位层数做登记、筛选与状态流转。当前件数按入库关系实时统计。</p>
       </div>
       <div class="page-actions">
         <button class="btn primary" type="button" @click="openCreate">登记库房架位</button>
@@ -12,7 +12,7 @@
     </header>
 
     <div class="stat-row">
-      <article v-for="item in stats" :key="item.label" class="stat-card">
+      <article v-for="item in statCards" :key="item.label" class="stat-card">
         <span class="stat-label">{{ item.label }}</span>
         <strong class="stat-value">{{ item.value }}</strong>
       </article>
@@ -24,12 +24,11 @@
       </span>
     </p>
 
-    <form class="filter-bar" @submit.prevent="reload">
+    <form class="filter-bar" @submit.prevent>
       <label v-for="field in filterFields" :key="field" class="filter-item">
         <span>{{ field }}</span>
         <input v-model="filters[field]" :placeholder="`按${field}检索`" />
       </label>
-      <button class="btn" type="submit">查询</button>
       <button class="btn ghost" type="button" @click="resetFilters">重置条件</button>
     </form>
 
@@ -64,34 +63,33 @@
     </table>
 
     <footer class="page-foot">
-      <span>共 {{ total }} 条库房管理记录</span>
+      <span>共 {{ total }} 条库房架位记录，当前件数与出土遗物入库记录一致</span>
       <span v-if="errorMessage" class="error-text">{{ errorMessage }}</span>
     </footer>
   </section>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, ref } from 'vue'
 
-import {
-  downloadEntries,
-  listEntries,
-  moduleMeta,
-  runAction as applyAction,
-} from '@/api/local-service'
+import { downloadEntries, runAction as applyAction } from '@/api/local-service'
+import { useModuleEntries } from '@/api/use-data'
 import type { EntryRow } from '@/data/types'
 
-const meta = moduleMeta('storage')
 const columns = ["架位编号", "库房名称", "存放器物类别", "架位层数", "容纳件数", "当前件数", "管理人", "架位状态"]
 const actions = ["存放器物", "调整整理", "临时封存"]
 const statuses = ["正常使用", "已满", "待整理", "临时封存"]
-const stats = [{"label": "架位总数", "value": 0}, {"label": "已满架位", "value": 0}, {"label": "可用架位", "value": 0}]
 
-const rows = ref<EntryRow[]>([])
-const total = ref(0)
-const errorMessage = ref('')
-const filters = ref<Record<string, string>>({})
+const { filters, items: rows, total } = useModuleEntries('storage')
 const filterFields = columns.slice(0, 3)
+const errorMessage = ref('')
+
+const statCards = computed(() => [
+  { label: '架位总数', value: total.value },
+  { label: '已满架位', value: rows.value.filter((row) => String(row.status) === '已满').length },
+  { label: '可用架位', value: rows.value.filter((row) => String(row.status) === '正常使用').length },
+])
+
 const statusSummary = computed(() =>
   statuses.map((status: string) => ({
     status,
@@ -101,11 +99,10 @@ const statusSummary = computed(() =>
 
 function resetFilters() {
   filters.value = {}
-  reload()
 }
 
 function exportRows() {
-  downloadEntries(meta.key)
+  downloadEntries('storage')
 }
 
 function openCreate() {
@@ -114,24 +111,9 @@ function openCreate() {
 
 function runAction(action: string, row: EntryRow) {
   errorMessage.value = ''
-  const result = applyAction(meta.key, Number(row.id), action)
+  const result = applyAction('storage', Number(row.id), action)
   if (!result.ok) {
     errorMessage.value = result.message
-    return
-  }
-  reload()
-}
-
-function reload() {
-  errorMessage.value = ''
-  try {
-    const payload = listEntries(meta.key, filters.value)
-    rows.value = payload.items
-    total.value = payload.total
-  } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : '库房管理列表读取失败'
   }
 }
-
-onMounted(reload)
 </script>

@@ -12,7 +12,7 @@
     </header>
 
     <div class="stat-row">
-      <article v-for="item in stats" :key="item.label" class="stat-card">
+      <article v-for="item in statCards" :key="item.label" class="stat-card">
         <span class="stat-label">{{ item.label }}</span>
         <strong class="stat-value">{{ item.value }}</strong>
       </article>
@@ -24,12 +24,11 @@
       </span>
     </p>
 
-    <form class="filter-bar" @submit.prevent="reload">
+    <form class="filter-bar" @submit.prevent>
       <label v-for="field in filterFields" :key="field" class="filter-item">
         <span>{{ field }}</span>
         <input v-model="filters[field]" :placeholder="`按${field}检索`" />
       </label>
-      <button class="btn" type="submit">查询</button>
       <button class="btn ghost" type="button" @click="resetFilters">重置条件</button>
     </form>
 
@@ -38,16 +37,27 @@
         <tr>
           <th v-for="column in columns" :key="column">{{ column }}</th>
           <th>当前状态</th>
+          <th>入库架位</th>
           <th>可执行动作</th>
         </tr>
       </thead>
       <tbody>
         <tr v-for="row in rows" :key="String(row.id)">
-          <td v-for="column in columns" :key="column">{{ row[column] ?? '—' }}</td>
+          <td v-for="column in columns" :key="column">
+            <RouterLink
+              v-if="column === '器物编号'"
+              class="link"
+              :to="{ name: 'artifact-detail', params: { id: row.id } }"
+            >
+              {{ row[column] ?? '—' }}
+            </RouterLink>
+            <template v-else>{{ row[column] ?? '—' }}</template>
+          </td>
           <td>{{ row.status }}</td>
+          <td>{{ shelfCodeOf(row) ?? '—' }}</td>
           <td class="row-actions">
             <button
-              v-for="action in actions"
+              v-for="action in availableActions(row)"
               :key="action"
               class="link"
               type="button"
@@ -58,40 +68,60 @@
           </td>
         </tr>
         <tr v-if="!rows.length">
-          <td :colspan="columns.length + 2" class="empty-state">暂无出土遗物数据，可先登记出土遗物</td>
+          <td :colspan="columns.length + 3" class="empty-state">暂无出土遗物数据，可先登记出土遗物</td>
         </tr>
       </tbody>
     </table>
 
     <footer class="page-foot">
       <span>共 {{ total }} 条出土遗物记录</span>
-      <span v-if="errorMessage" class="error-text">{{ errorMessage }}</span>
+      <span v-if="noticeMessage" :class="noticeKind === 'error' ? 'error-text' : 'ok-text'">{{ noticeMessage }}</span>
     </footer>
+
+    <StockInDialog
+      v-model="stockInOpen"
+      :artifact-id="stockInTarget?.id ?? null"
+      :artifact-code="stockInTarget ? String(stockInTarget['器物编号']) : ''"
+      @done="onStockInDone"
+    />
   </section>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, ref } from 'vue'
 
 import {
   downloadEntries,
-  listEntries,
-  moduleMeta,
+  listShelfViews,
   runAction as applyAction,
 } from '@/api/local-service'
+import { useModuleEntries } from '@/api/use-data'
+import { SHELF_LINK_FIELD } from '@/data/local-store'
 import type { EntryRow } from '@/data/types'
+import StockInDialog from './StockInDialog.vue'
 
-const meta = moduleMeta('artifact')
 const columns = ["器物编号", "出土探方", "出土层位", "器物质地", "器物类型", "完残程度", "登记人", "登记状态"]
 const actions = ["完成清洗", "分配编号", "办理入库"]
 const statuses = ["已采集", "已清洗", "已编号", "已入库", "借出展示"]
-const stats = [{"label": "遗物总数", "value": 0}, {"label": "已入库数", "value": 0}, {"label": "待清洗数", "value": 0}]
+const terminalStatuses = ["已入库", "借出展示"]
 
-const rows = ref<EntryRow[]>([])
-const total = ref(0)
-const errorMessage = ref('')
-const filters = ref<Record<string, string>>({})
+const { filters, items: rows, total } = useModuleEntries('artifact')
 const filterFields = columns.slice(0, 3)
+
+const noticeMessage = ref('')
+const noticeKind = ref<'error' | 'ok'>('error')
+const stockInOpen = ref(false)
+const stockInTarget = ref<EntryRow | null>(null)
+
+const statCards = computed(() => [
+  { label: '遗物总数', value: total.value },
+  {
+    label: '已入库数',
+    value: rows.value.filter((row) => terminalStatuses.includes(String(row.status))).length,
+  },
+  { label: '待清洗数', value: rows.value.filter((row) => String(row.status) === '已采集').length },
+])
+
 const statusSummary = computed(() =>
   statuses.map((status: string) => ({
     status,
@@ -101,37 +131,47 @@ const statusSummary = computed(() =>
 
 function resetFilters() {
   filters.value = {}
-  reload()
 }
 
 function exportRows() {
-  downloadEntries(meta.key)
+  downloadEntries('artifact')
 }
 
 function openCreate() {
-  errorMessage.value = '出土遗物登记入口尚未接入审批流'
+  noticeKind.value = 'error'
+  noticeMessage.value = '出土遗物登记入口尚未接入审批流'
+}
+
+// 已归档（已入库/借出）的遗物不再显示状态动作，历史记录不允许被回退改写。
+function availableActions(row: EntryRow): string[] {
+  return terminalStatuses.includes(String(row.status)) ? [] : actions
+}
+
+function shelfCodeOf(row: EntryRow): string | undefined {
+  const linked = row[SHELF_LINK_FIELD]
+  if (linked === undefined || linked === '') {
+    return undefined
+  }
+  const shelf = listShelfViews().find((item) => item.id === Number(linked))
+  return shelf?.code ?? String(linked)
 }
 
 function runAction(action: string, row: EntryRow) {
-  errorMessage.value = ''
-  const result = applyAction(meta.key, Number(row.id), action)
-  if (!result.ok) {
-    errorMessage.value = result.message
+  noticeMessage.value = ''
+  if (action === '办理入库') {
+    stockInTarget.value = row
+    stockInOpen.value = true
     return
   }
-  reload()
+  const result = applyAction('artifact', Number(row.id), action)
+  noticeKind.value = result.ok ? 'ok' : 'error'
+  noticeMessage.value = result.message
 }
 
-function reload() {
-  errorMessage.value = ''
-  try {
-    const payload = listEntries(meta.key, filters.value)
-    rows.value = payload.items
-    total.value = payload.total
-  } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : '出土遗物列表读取失败'
-  }
+function onStockInDone(message: string) {
+  noticeKind.value = 'ok'
+  noticeMessage.value = message
+  // 提交后事务已更新 dataTick，列表与库房页的 computed 自动重算，无需手动 reload。
+  stockInTarget.value = null
 }
-
-onMounted(reload)
 </script>
